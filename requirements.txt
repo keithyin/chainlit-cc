@@ -1,0 +1,7 @@
+chainlit>=2.2
+claude-agent-sdk
+python-dotenv
+pyyaml
+# 聊天记录持久化用的数据层（db.py）
+sqlalchemy>=2.0.28,<3.0.0
+aiosqlite>=0.20.0

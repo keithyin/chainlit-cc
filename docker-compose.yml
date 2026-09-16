@@ -1,0 +1,38 @@
+# 用法：在 .env 里配好 APP_USERS / CHAINLIT_AUTH_SECRET / ANTHROPIC_API_KEY，
+# 然后 `docker compose up -d --build`。
+# 变量插值读的是同目录的 .env（这是 compose 的行为，与应用的 dotenv 无关）。
+services:
+  app:
+    build: .
+    ports:
+      # 默认只绑本机。要暴露给同事时，前面必须有一层带 TLS 的反向代理，
+      # 见 DEPLOY.md。
+      - "127.0.0.1:8000:8000"
+    environment:
+      # 容器内的 127.0.0.1 是容器自己，宿主机上的网关要走 host.docker.internal。
+      # 用官方 API 的话改这里为 https://api.anthropic.com。
+      ANTHROPIC_BASE_URL: ${GATEWAY_URL:-http://host.docker.internal:15721}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?请在 .env 中配置}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5}
+      ALLOWED_TOOLS: ${ALLOWED_TOOLS:-Read,Glob,Grep}
+      APP_USERS: ${APP_USERS:?必须配置 APP_USERS，否则没人能登录}
+      CHAINLIT_AUTH_SECRET: ${CHAINLIT_AUTH_SECRET:?必须配置 CHAINLIT_AUTH_SECRET}
+      # 聊天记录（SQLite）落在 history 卷上
+      CHAINLIT_HISTORY_DB: /app/state/chainlit_history.db
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - cc-state:/home/app/.chainlit-cc # 各会话的 transcript 与 memory
+      - workspaces:/home/app/chainlit-cc-workspaces # 使用者自己的工作文件
+      - history:/app/state # 聊天记录库
+    restart: unless-stopped
+    # agent 跑 Bash 会吃 CPU/内存，按机器规格收紧
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
+volumes:
+  cc-state:
+  workspaces:
+  history:

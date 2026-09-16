@@ -1,0 +1,77 @@
+# Claude Code 能力网页版
+
+把 Claude Code 的能力做成网页：同事打开浏览器登录就能用，不需要装 CLI。
+
+- **流式输出**：正文逐 token 流式，工具调用以 COT step 展示（input / output）
+- **共享能力包**：`capabilities/` 里的 skill 对所有使用者可用，发 `/skills` 看清单、一键调用
+- **Human-in-the-loop**：`ALLOWED_TOOLS` 允许列表内的工具直接执行，其余弹出审批卡片（批准 / 拒绝）。
+  注意：CLI 内置的只读 Bash 命令（`ls`/`cat`/`echo` 等）会被 CLI 自动放行、不进入审批流；
+  写操作（重定向、`touch`、`rm` …）才会弹出审批。
+- **中断**：流式期间输入框的停止按钮（等价 CLI 的 Escape），或发送 `/stop`
+- **独立工作目录**：每个人一个目录（`~/chainlit-cc-workspaces/<登录名>/`），互不干扰
+- **文件上传**：输入框回形针上传的文件会放进你的工作目录，Claude 按路径读取
+- **多会话**：同一人的各会话上下文与 memory 完全隔离
+
+## 命令
+
+| 命令 | 说明 |
+|---|---|
+| 直接发消息 | 在激活会话中执行任务 |
+| `/skills` | 共享能力面板（列出能力包，一键调用） |
+| `/new [标题]` | 新建会话并切换 |
+| `/sessions` | 列出会话，点选切换 / 停止 |
+| `/stop` | 停止激活会话正在运行的任务 |
+| `/help` | 显示帮助 |
+
+其余以 `/` 开头的输入会原样交给 Claude Code：
+
+- CLI 内置命令：`/compact`、`/context`、`/cost` 等
+- 共享能力包里的 skill：`/<能力名>`
+
+## 加一个共享能力
+
+在 `capabilities/.claude/skills/<能力名>/SKILL.md` 写一个带 frontmatter 的 skill 即可，
+写法见 `capabilities/README.md`。放进那个目录就是对所有使用者生效。
+
+## 配置（`.env`）
+
+| 变量 | 说明 |
+|---|---|
+| `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | 模型网关连接 |
+| `ALLOWED_TOOLS` | 工具允许列表（逗号分隔，支持 `Bash(git log:*)` 规则语法） |
+| `APP_USERS` | 登录凭据（`名字:密码,名字:密码`）。**不配置则拒绝所有登录** |
+| `CHAINLIT_AUTH_SECRET` | 会话签名密钥，改动会让所有人退出登录 |
+| `APPROVAL_TIMEOUT_S` | 审批等待超时秒数（默认 300） |
+| `WORKSPACES_DIR` | 每使用者工作目录根（默认 `~/chainlit-cc-workspaces`） |
+
+分享给同事的部署步骤见 `DEPLOY.md`。
+
+## 运行
+
+```bash
+chainlit run app.py
+```
+
+浏览器打开 http://localhost:8000。
+
+端到端自检（需要应用已在跑，且该实例的 `APP_USERS` 里有测试账号）：
+
+```bash
+APP_USERS="alice:testpw123" chainlit run app.py --port 8124   # 另开一个终端
+python test_e2e.py
+```
+
+覆盖登录、能力面板、命令转发、能力调用、文件上传、工作目录隔离。
+其中能力调用与上传提问会真的走模型，整体约几分钟。
+
+## 实现要点
+
+- 会话列表存于进程内存（`cl.user_session`），应用重启后丢失；
+  各会话的 CLI 状态（transcript / memory）保留在 `~/.chainlit-cc/<会话id>/`，不会串到其他会话。
+- 应用的 CLI 子进程不读写开发者真实的 `~/.claude`（通过 `CLAUDE_CONFIG_DIR` 隔离到 `~/.chainlit-cc/`）。
+  **代价**：你个人 `~/.claude/skills/` 里的能力在这个应用里看不到——所以共享能力必须放在
+  `capabilities/`（应用通过 `add_dirs` 挂载它）。
+- 每个会话保持一个常驻 CLI 子进程，轮次间复用（无每轮冷启动）；
+  停止（`/stop` / 停止按钮）以 Escape 语义中断，下一轮凭 resume 续接；
+  运行中修改 `.env` 对已连接的会话不生效（需该会话断开重连）；应用退出时全部断开。
+- Agent 的工作目录是**使用者自己的工作目录**，不是应用源码目录。

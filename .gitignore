@@ -1,0 +1,9 @@
+# 运行期产生的文件，不进版本库
+.chainlit/translations/
+chainlit_history.db
+chainlit_history.db-journal
+chainlit_history.db-wal
+.files/
+__pycache__/
+*.py[cod]
+.env
