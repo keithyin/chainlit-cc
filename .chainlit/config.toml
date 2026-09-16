@@ -152,8 +152,9 @@ cot = "full"
 
 # Specify a JavaScript file that can be used to customize the user interface.
 # The JavaScript file can be served from the public directory.
-# 刷新后自动跳回上次的线程（见 public/resume.js）
-custom_js = "/public/resume.js"
+# 浏览器端补丁（刷新跳回上次线程、登录页加注册入口，见 public/ui.js）
+# 注意 custom_js 只有单值：多个补丁得放同一个文件里
+custom_js = "/public/ui.js"
 
 # The style of alert boxes. Can be "classic" or "modern".
 alert_style = "classic"

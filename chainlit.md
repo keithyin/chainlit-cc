@@ -11,6 +11,7 @@
 - **独立工作目录**：每个人一个目录（`~/chainlit-cc-workspaces/<登录名>/`），互不干扰
 - **文件上传**：输入框回形针上传的文件会放进你的工作目录，Claude 按路径读取
 - **多会话**：同一人的各会话上下文与 memory 完全隔离
+- **自助注册**：登录页下方的「注册」链接（或直接打开 `/public/register.html`），注册完自动登录
 
 ## 命令
 
@@ -33,13 +34,26 @@
 在 `capabilities/.claude/skills/<能力名>/SKILL.md` 写一个带 frontmatter 的 skill 即可，
 写法见 `capabilities/README.md`。放进那个目录就是对所有使用者生效。
 
+## 账号
+
+在登录页点「注册」自助建号（没有审批，谁都能注册），注册成功即自动登录。
+之后可以在登录页用同一个用户名密码登录。
+
+- 用户名 2-32 位，只能用字母、数字和 `_ . -`，且首尾必须是字母或数字；区分大小写
+- 密码至少 8 位
+- 用户名同时决定工作目录：`~/chainlit-cc-workspaces/<用户名>/`
+- 没有邮箱验证、没有找回密码、没有管理界面。账号存在聊天记录那个 SQLite 库里
+  （`user_accounts` 表，口令用 scrypt 加盐哈希）——删掉那个库，自注册账号就一起没了
+- `APP_USERS` 里的名字优先级最高，也注册不了（会提示已被占用），
+  它是部署者留的引导账号（见 `DEPLOY.md`）
+
 ## 配置（`.env`）
 
 | 变量 | 说明 |
 |---|---|
 | `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | 模型网关连接 |
 | `ALLOWED_TOOLS` | 工具允许列表（逗号分隔，支持 `Bash(git log:*)` 规则语法） |
-| `APP_USERS` | 登录凭据（`名字:密码,名字:密码`）。**不配置则拒绝所有登录** |
+| `APP_USERS` | 引导/管理员账号（`名字:密码,名字:密码`），可选。**它优先于自注册账号**；两个来源都没有凭据时拒绝所有登录 |
 | `CHAINLIT_AUTH_SECRET` | 会话签名密钥，改动会让所有人退出登录 |
 | `APPROVAL_TIMEOUT_S` | 审批等待超时秒数（默认 300） |
 | `WORKSPACES_DIR` | 每使用者工作目录根（默认 `~/chainlit-cc-workspaces`） |
@@ -61,7 +75,7 @@ APP_USERS="alice:testpw123" chainlit run app.py --port 8124   # 另开一个终�
 python test_e2e.py
 ```
 
-覆盖登录、能力面板、命令转发、能力调用、文件上传、工作目录隔离。
+覆盖登录、自助注册、能力面板、命令转发、能力调用、文件上传、工作目录隔离。
 其中能力调用与上传提问会真的走模型，整体约几分钟。
 
 ## 实现要点
@@ -75,3 +89,9 @@ python test_e2e.py
   停止（`/stop` / 停止按钮）以 Escape 语义中断，下一轮凭 resume 续接；
   运行中修改 `.env` 对已连接的会话不生效（需该会话断开重连）；应用退出时全部断开。
 - Agent 的工作目录是**使用者自己的工作目录**，不是应用源码目录。
+- 自注册账号走独立的一张表（`user_accounts`，见 `db.py` / `accounts.py`），口令用 stdlib
+  的 `scrypt` 加盐哈希，不引第三方依赖。没有塞进 Chainlit 的 `users` 表：那张表的
+  metadata 每次登录都会被覆盖，还会随 `GET /user` 发给浏览器。
+- 注册端点是挂在 Chainlit 自己的 FastAPI app 上的 `POST /register`（`register.py`），
+  注册页是 `public/register.html`；登录页那个「注册」链接由 `public/ui.js` 注入
+  （Chainlit 的登录页没有注册钩子，只能这样挂）。

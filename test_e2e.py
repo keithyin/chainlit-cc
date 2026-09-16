@@ -1,7 +1,7 @@
 """端到端验证（socketio 直连 + 登录 cookie），需要一个正在运行的应用实例。
 
 覆盖：登录 → /skills 能力面板 → 非应用斜杠命令转发 → 技能真的被执行
-      → 文件上传落进工作目录 → 工作目录隔离。
+      → 文件上传落进工作目录 → 工作目录隔离 → 自助注册。
 
 用法:
     APP_USERS="alice:testpw123" chainlit run app.py --port 8124
@@ -9,6 +9,7 @@
     E2E_BASE=http://127.0.0.1:8000 E2E_USER=bob E2E_PW=xxx python test_e2e.py
 
 注意：技能那一步会真的调用模型（几十秒），其余步骤大多只依赖本地行为。
+自助注册那节（check_registration）不碰模型，可以单独跑。
 """
 import os
 import sys
@@ -92,13 +93,20 @@ def wait_task_end(since=0, timeout=240) -> bool:
     return False
 
 
-def login() -> str:
+def login(user=USER, pw=PW) -> str:
     s = requests.Session()
-    r = s.post(f"{BASE}/login", data={"username": USER, "password": PW}, timeout=15)
+    r = s.post(f"{BASE}/login", data={"username": user, "password": pw}, timeout=15)
     assert r.status_code == 200, f"登录失败 {r.status_code}"
     cookie = s.cookies.get("access_token")
     assert cookie, "没拿到 access_token cookie"
     return cookie
+
+
+def register(name: str, pw: str) -> requests.Response:
+    """POST /register（自助注册端点，见 register.py）。"""
+    return requests.post(
+        f"{BASE}/register", json={"username": name, "password": pw}, timeout=15
+    )
 
 
 def send(sio, text: str, file_refs=None):
@@ -137,6 +145,46 @@ def click(cookie: str, sid: str, action) -> int:
     r = requests.post(f"{BASE}/project/action", json=payload,
                       cookies={"access_token": cookie}, timeout=20)
     return r.status_code
+
+
+def check_registration():
+    """第 7 节：自助注册。不调用模型，可单独跑：
+
+        python -c "import test_e2e as t; t.check_registration()"
+    """
+    name = "e2e-" + uuid.uuid4().hex[:8]
+    check("注册返回 200", register(name, PW).status_code == 200)
+    check("重名注册返回 409", register(name, PW).status_code == 409)
+    check("非法用户名返回 400", register("a b", PW).status_code == 400)
+    check("短密码返回 400", register(name + "x", "short").status_code == 400)
+    # alice 在 APP_USERS 里，注册端不该把管理员名字让出去
+    check("APP_USERS 里的名字不能注册", register(USER, PW).status_code == 409)
+
+    # 注册接口自己种 cookie = 注册即登录，不发第二次请求
+    s = requests.Session()
+    auto = name + "-a"
+    r = s.post(f"{BASE}/register", json={"username": auto, "password": PW}, timeout=15)
+    me = s.get(f"{BASE}/user", timeout=15) if r.status_code == 200 else None
+    check("注册后直接进入登录态",
+          bool(me) and me.status_code == 200 and me.json().get("identifier") == auto)
+
+    cookie = login(name, PW)
+    check("注册的账号能正常登录", bool(cookie))
+
+    m = mark()
+    sid = uuid.uuid4().hex
+    sio = socketio.Client()
+    sio.on("*", lambda event, data=None: rec(event, data))
+    sio.connect(BASE, socketio_path="/ws/socket.io",
+                auth={"sessionId": sid, "clientType": "webapp"},
+                headers={"Cookie": f"access_token={cookie}"},
+                transports=["polling"])
+    sio.emit("connection_successful")
+    time.sleep(3)
+    check("注册的账号能建立会话", bool(new_messages(m)))
+    check("注册的账号有自己的工作目录",
+          os.path.isdir(os.path.join(WORKSPACES_ROOT, name)))
+    sio.disconnect()
 
 
 def main() -> int:
@@ -231,6 +279,10 @@ def main() -> int:
     check("工作目录已创建", os.path.isdir(ws))
 
     sio.disconnect()
+
+    # ---- 7. 自助注册 ----
+    print("\n--- 自助注册 ---")
+    check_registration()
 
     print("\n=== 判定 ===")
     for name, ok in results.items():

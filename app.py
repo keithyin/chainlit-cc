@@ -39,6 +39,9 @@ from agent import (
 # 导入即完成 Chainlit 鉴权回调注册（装饰器在 auth 模块内生效）
 from auth import password_auth  # noqa: F401
 
+# 导入即把 POST /register 挂到 Chainlit 的 FastAPI app 上（见 register.py）
+import register  # noqa: F401
+
 # 由本应用自己处理的斜杠命令。其余原样转发给 CLI —— 那里既有内置命令
 # （/compact、/context…），也有共享能力包里的 skill（/<能力名>）。
 APP_COMMANDS = {"/help", "/new", "/sessions", "/skills", "/stop"}

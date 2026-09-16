@@ -104,6 +104,20 @@ SCHEMA = [
         "comment" TEXT
     );
     """,
+    # 自助注册账号的口令（读写都在 accounts.py）。
+    #
+    # 刻意不放进 Chainlit 的 users 表：那一行的 metadata 每次登录都会被
+    # sql_alchemy.create_user 覆盖，而且会随 GET /user 原样发给浏览器——
+    # 口令哈希放那儿既会丢又会泄。users 的列名又是 Chainlit 绑定死的，
+    # 加列得 ALTER TABLE，而现网已经有一个存量库，CREATE TABLE IF NOT EXISTS
+    # 是这里唯一免迁移的建表手段，所以另起一张表。
+    """
+    CREATE TABLE IF NOT EXISTS user_accounts (
+        "username" TEXT PRIMARY KEY,
+        "passwordHash" TEXT NOT NULL,
+        "createdAt" TEXT NOT NULL
+    );
+    """,
     'CREATE INDEX IF NOT EXISTS idx_steps_thread ON steps ("threadId");',
     'CREATE INDEX IF NOT EXISTS idx_elements_thread ON elements ("threadId");',
 ]

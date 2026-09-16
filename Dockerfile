@@ -10,7 +10,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 刻意不 COPY .env：密钥一律走环境变量，不进镜像层
-COPY agent.py app.py auth.py db.py chainlit.md ./
+COPY agent.py app.py auth.py accounts.py register.py db.py chainlit.md ./
 COPY capabilities ./capabilities
 COPY public ./public
 COPY .chainlit ./.chainlit
