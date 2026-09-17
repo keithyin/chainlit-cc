@@ -83,6 +83,15 @@ HELP_TEXT = f"""👋 这是一个 Claude Code CLI 风格的交互界面。
 `.env` 中 `ALLOWED_TOOLS` 允许列表内的工具直接执行，
 其余工具会弹出审批卡片（批准 / 拒绝）后才执行
 （CLI 内置只读命令如 ls/cat/echo 由 CLI 自动放行，不进审批）。
+等审批时输入框是锁住的，要先在卡片上选一个；同一标签页同一时间只有一张卡。
+在卡片上批准过的工具，Claude 会收到一条提示知道"这是人工批准的"。
+
+**Claude 提问**
+Claude 需要你拿主意时会弹**提问卡**：单选每个选项一个按钮，
+点「✍️ 其他」可以自己输入；多选会连着弹几张、选完点「✅ 选好了」。
+你选的内容会原样回到 Claude 那边（成对出现的多张卡片是同一道多选题的连续几轮）。
+提问卡和审批卡共用一条通道，同一标签页同一时间只有一张卡。
+
 流式输出期间，输入框的停止按钮等价于 CLI 的 Escape。"""
 
 
@@ -286,7 +295,10 @@ async def on_chat_resume(thread: ThreadDict):
 # ---------------------------------------------------------------------------
 
 async def _run_turn(conv: Conversation, prompt: str):
-    turn = TurnState(conv_id=conv.id, task=asyncio.current_task())
+    # session 记的是本轮的浏览器会话：agent.py 的权限回调靠它重绑 Chainlit 上下文
+    # （SDK 的回调 task 继承的是首次建连那一轮的上下文），审批串行锁也按它分桶。
+    turn = TurnState(conv_id=conv.id, task=asyncio.current_task(),
+                     session=cl.context.session)
     _running[conv.id] = turn
 
     client = None
@@ -476,20 +488,6 @@ async def _cmd_sessions():
 # ---------------------------------------------------------------------------
 # action 回调（HTTP /project/action 触发，与 websocket 同一 event loop）
 # ---------------------------------------------------------------------------
-
-@cl.action_callback("tool_approval")
-async def on_tool_approval(action: cl.Action):
-    turn = _running.get(action.payload.get("conv", ""))
-    if turn is None:
-        return  # turn 已结束：幂等忽略
-    item = turn.pending_approvals.get(action.payload.get("tid", ""))
-    if item is None:
-        return
-    fut, _ = item
-    if fut.done():
-        return  # 防双击 / 点击已过期
-    fut.set_result((action.payload.get("decision", "deny"), ""))
-
 
 @cl.action_callback("conv_switch")
 async def on_conv_switch(action: cl.Action):

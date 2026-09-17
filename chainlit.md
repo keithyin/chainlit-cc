@@ -7,6 +7,15 @@
 - **Human-in-the-loop**：`ALLOWED_TOOLS` 允许列表内的工具直接执行，其余弹出审批卡片（批准 / 拒绝）。
   注意：CLI 内置的只读 Bash 命令（`ls`/`cat`/`echo` 等）会被 CLI 自动放行、不进入审批流；
   写操作（重定向、`touch`、`rm` …）才会弹出审批。
+  卡片走框架的 ask 通道，同一标签页同一时间只有一张卡；等审批时输入框是锁住的，得先在卡片上选一个。
+  超时（默认 300 秒，见 `APPROVAL_TIMEOUT_S`）自动按拒绝处理，卡面会写明结论。
+  批准过的工具，Claude 会收到一条 `<system-reminder>` 提示知道"这是人工批准、不是自动放行"
+  （allow 结果本身没有文本通道，只能靠 PostToolUse hook 的 additionalContext 告知）。
+- **Claude 提问**：Claude 调 `AskUserQuestion` 时弹提问卡——单选每个选项一个按钮，多选连弹几张、
+  点「✅ 选好了」结束，两种都能点「✍️ 其他」自己输入。选中的答案会原样回填给 Claude
+  （超时按"未作答"回填，对齐 CLI 原生的 AFK 语义）。
+  **别把 `AskUserQuestion` 写进 `ALLOWED_TOOLS`**：那样 CLI 会直接放行、不走本应用的权限回调，
+  提问会以"无人作答"收场。
 - **中断**：流式期间输入框的停止按钮（等价 CLI 的 Escape），或发送 `/stop`
 - **独立工作目录**：每个人一个目录（`~/chainlit-cc-workspaces/<登录名>/`），互不干扰
 - **文件上传**：输入框回形针上传的文件会放进你的工作目录，Claude 按路径读取
@@ -77,6 +86,17 @@ python test_e2e.py
 
 覆盖登录、自助注册、能力面板、命令转发、能力调用、文件上传、工作目录隔离。
 其中能力调用与上传提问会真的走模型，整体约几分钟。
+
+审批卡（HITL）单独一套：批准 / 拒绝 / 被拒后继续 / 卡片在屏时停止 / 停止后再审批一轮，
+会真的等审批弹卡再自动点按钮，并从文件系统上核对工具到底跑没跑（约几分钟，含 5 轮模型调用）。
+
+```bash
+APP_USERS="hitl:testpw123" CHAINLIT_HISTORY_DB=/tmp/hitl.db \
+  chainlit run app.py --port 8124   # 另开一个终端（和上一条同一个端口，别同时跑）
+E2E_BASE=http://127.0.0.1:8124 E2E_USER=hitl E2E_PW=testpw123 python test_hitl.py
+```
+
+脚本用 socketio 直连收发（无浏览器），所以点不到 DOM 上的禁用态——「按钮可点」这件事仍要人眼确认。
 
 ## 实现要点
 
